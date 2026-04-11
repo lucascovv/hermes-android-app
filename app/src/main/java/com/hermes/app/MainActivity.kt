@@ -258,10 +258,15 @@ class MainActivity : AppCompatActivity() {
                 fileUploadCallback = callback
                 try {
                     val acceptTypes = params.acceptTypes
-                    val isImageRequest = acceptTypes.any { it.startsWith("image/") || it == "image/*" }
+                    val isImageRequest = acceptTypes.any {
+                        it.isNotEmpty() && (it.startsWith("image/") || it == "image/*")
+                    }
 
-                    if (isImageRequest) {
-                        // For image requests → offer camera + gallery chooser
+                    if (isImageRequest && params.isCaptureEnabled) {
+                        // capture attribute set → open camera directly
+                        launchDirectCamera()
+                    } else if (isImageRequest) {
+                        // No capture → offer camera + gallery chooser
                         launchCameraOrGalleryChooser()
                     } else {
                         // For other types (files, etc) → use the default intent
@@ -391,10 +396,28 @@ class MainActivity : AppCompatActivity() {
         webView.evaluateJavascript(js, null)
     }
 
+    private fun launchDirectCamera() {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val cacheDir = externalCacheDir ?: cacheDir
+        val photoFile = File(cacheDir, "PHOTO_${timeStamp}.jpg")
+        cameraPhotoUri = FileProvider.getUriForFile(
+            this,
+            "${applicationContext.packageName}.fileprovider",
+            photoFile
+        )
+
+        val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+            putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }
+        fileChooserLauncher.launch(cameraIntent)
+    }
+
     private fun launchCameraOrGalleryChooser() {
         // Create temp file for camera photo
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val photoFile = File(externalCacheDir, "PHOTO_${timeStamp}.jpg")
+        val cacheDir = externalCacheDir ?: cacheDir
+        val photoFile = File(cacheDir, "PHOTO_${timeStamp}.jpg")
         cameraPhotoUri = FileProvider.getUriForFile(
             this,
             "${applicationContext.packageName}.fileprovider",
