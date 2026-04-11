@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.media.MediaRecorder
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -16,6 +17,7 @@ import android.os.Environment
 import android.os.PowerManager
 import android.provider.MediaStore
 import android.util.Base64
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -37,6 +39,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -77,22 +80,28 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
-            // Check if the result comes from file picker or camera
             val data = result.data
-            val results = if (data != null && data.data != null) {
-                // File picker result
-                arrayOf(data.data!!)
-            } else if (cameraPhotoUri != null) {
-                // Camera capture result — use the URI we created
-                arrayOf(cameraPhotoUri!!)
-            } else {
-                null
+            val photoUri = data?.data ?: cameraPhotoUri
+
+            if (fileUploadCallback != null) {
+                // Normal flow — Activity survived, deliver via callback
+                val results = if (photoUri != null) arrayOf(photoUri) else null
+                fileUploadCallback?.onReceiveValue(results)
+                fileUploadCallback = null
+                clearPendingCameraState()
+            } else if (photoUri != null) {
+                // Activity was recreated — fileUploadCallback is lost
+                // Save URI and inject photo via JS after page loads
+                Log.d("HermesApp", "Activity recreated after camera, will inject photo via JS")
+                getPrefs().edit().putString("pending_photo_uri", photoUri.toString()).apply()
+                // Try injecting immediately if WebView already loaded
+                webView.postDelayed({ injectPendingPhoto() }, 1500)
             }
-            fileUploadCallback?.onReceiveValue(results)
         } else {
             fileUploadCallback?.onReceiveValue(null)
+            fileUploadCallback = null
+            clearPendingCameraState()
         }
-        fileUploadCallback = null
         cameraPhotoUri = null
     }
 
@@ -111,6 +120,12 @@ class MainActivity : AppCompatActivity() {
             } else {
                 @Suppress("DEPRECATION")
                 savedInstanceState.getParcelable("cameraPhotoUri")
+            }
+        }
+        // Also try SharedPreferences (survives process death)
+        if (cameraPhotoUri == null) {
+            getPrefs().getString("pending_camera_uri", null)?.let {
+                cameraPhotoUri = Uri.parse(it)
             }
         }
 
@@ -266,6 +281,8 @@ class MainActivity : AppCompatActivity() {
             onPageFinished = {
                 progressBar.visibility = View.GONE
                 injectNotificationBridge()
+                // Check if there's a pending photo from camera (Activity was recreated)
+                webView.postDelayed({ injectPendingPhoto() }, 800)
             },
             onError = { errorMsg -> showError(errorMsg) }
         )
@@ -408,26 +425,34 @@ class MainActivity : AppCompatActivity() {
                     }
                 };
 
-                console.log('[HermesApp] Native bridge v2.2.1 installed');
+                console.log('[HermesApp] Native bridge v2.2.2 installed');
 
                 // Inject "Alterar servidor" card in the settings hub page
                 function injectServerOption() {
-                    if (document.querySelector('#hermes-change-server')) return;
-                    // Find the settings grid (grid-cols-2 hub cards)
-                    var grid = document.querySelector('div[class*="grid-cols-2"][class*="gap-"]');
-                    if (!grid) return;
-                    // Check that it looks like the settings hub (has glass-card children)
-                    if (!grid.querySelector('[class*="glass-card"]') && !grid.querySelector('[class*="flex-col"]')) return;
+                    if (document.querySelector('#hermes-change-server')) return true;
+                    // Try multiple selectors for the settings grid
+                    var grid = document.querySelector('.grid.grid-cols-2.gap-3')
+                             || document.querySelector('.grid.grid-cols-2.gap-4')
+                             || document.querySelector('div[class*="grid-cols-2"][class*="gap-"]');
+                    if (!grid) return false;
+                    // Only inject on settings-like pages (grid must have multiple card-like children)
+                    if (grid.children.length < 2) return false;
                     var card = document.createElement('div');
                     card.id = 'hermes-change-server';
                     card.className = 'flex flex-col items-center justify-center p-5 sm:p-6 glass-card rounded-2xl hover:bg-hermes-50/50 dark:hover:bg-hermes-900/10 transition-all duration-200 min-h-[110px] sm:min-h-[120px] group cursor-pointer border-2 border-transparent hover:border-hermes-200 dark:hover:border-hermes-800/40';
                     card.innerHTML = '<div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-2 sm:mb-3 bg-gradient-to-br from-blue-400 to-blue-600 shadow-lg"><svg class="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg></div><span class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 text-center leading-tight">Alterar<br/>Servidor</span>';
                     card.onclick = function() { if(window.HermesAndroid) HermesAndroid.changeServerUrl(); };
                     grid.appendChild(card);
+                    console.log('[HermesApp] Server card injected into settings');
+                    return true;
                 }
-                var _hsObserver = new MutationObserver(function() { setTimeout(injectServerOption, 300); });
-                _hsObserver.observe(document.body, { childList: true, subtree: true });
-                setTimeout(injectServerOption, 1500);
+                // Use setInterval for reliable injection (SPA route changes don't trigger onPageFinished)
+                var _hsInterval = setInterval(function() { injectServerOption(); }, 1000);
+                // Also try immediately and with a small delay
+                injectServerOption();
+                setTimeout(injectServerOption, 500);
+                setTimeout(injectServerOption, 2000);
+            })();
             })();
         """.trimIndent()
 
@@ -444,6 +469,9 @@ class MainActivity : AppCompatActivity() {
             photoFile
         )
 
+        // Save to SharedPreferences (survives process death)
+        savePendingCameraState()
+
         val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
             putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri)
             addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
@@ -452,7 +480,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchCameraOrGalleryChooser() {
-        // Create temp file for camera photo
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val cacheDir = externalCacheDir ?: cacheDir
         val photoFile = File(cacheDir, "PHOTO_${timeStamp}.jpg")
@@ -462,23 +489,106 @@ class MainActivity : AppCompatActivity() {
             photoFile
         )
 
-        // Camera intent
+        // Save to SharedPreferences (survives process death)
+        savePendingCameraState()
+
         val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
             putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri)
             addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         }
 
-        // Gallery intent
         val galleryIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
             type = "image/*"
             addCategory(Intent.CATEGORY_OPENABLE)
         }
 
-        // Create chooser with camera as primary option
         val chooserIntent = Intent.createChooser(galleryIntent, "Selecionar imagem")
         chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(cameraIntent))
 
         fileChooserLauncher.launch(chooserIntent)
+    }
+
+    private fun savePendingCameraState() {
+        cameraPhotoUri?.let {
+            getPrefs().edit()
+                .putString("pending_camera_uri", it.toString())
+                .apply()
+        }
+    }
+
+    private fun clearPendingCameraState() {
+        getPrefs().edit()
+            .remove("pending_camera_uri")
+            .remove("pending_photo_uri")
+            .apply()
+    }
+
+    private fun injectPendingPhoto() {
+        val uriStr = getPrefs().getString("pending_photo_uri", null) ?: return
+
+        try {
+            val uri = Uri.parse(uriStr)
+            val inputStream = contentResolver.openInputStream(uri) ?: return
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream.close()
+
+            if (bitmap == null) {
+                clearPendingCameraState()
+                return
+            }
+
+            // Compress to JPEG 85% quality (keeps size manageable for JS injection)
+            val baos = ByteArrayOutputStream()
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, baos)
+            bitmap.recycle()
+
+            val bytes = baos.toByteArray()
+            val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            baos.close()
+
+            Log.d("HermesApp", "Injecting pending photo via JS (${bytes.size / 1024} KB)")
+
+            // Inject photo into the chat file input via JavaScript
+            val js = """
+                (function() {
+                    try {
+                        var base64 = '$base64';
+                        var byteChars = atob(base64);
+                        var byteNumbers = new Uint8Array(byteChars.length);
+                        for (var i = 0; i < byteChars.length; i++) {
+                            byteNumbers[i] = byteChars.charCodeAt(i);
+                        }
+                        var blob = new Blob([byteNumbers], { type: 'image/jpeg' });
+                        var file = new File([blob], 'camera_photo.jpg', { type: 'image/jpeg', lastModified: Date.now() });
+
+                        // Try to find the camera file input
+                        var input = document.querySelector('input[type="file"][capture]')
+                                 || document.querySelector('input[type="file"][accept*="image"]');
+                        if (input) {
+                            var dt = new DataTransfer();
+                            dt.items.add(file);
+                            input.files = dt.files;
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                            console.log('[HermesApp] Photo injected via file input');
+                            return;
+                        }
+
+                        // Fallback: dispatch custom event for Vue to pick up
+                        window.dispatchEvent(new CustomEvent('hermes-native-photo', { detail: { file: file } }));
+                        console.log('[HermesApp] Photo dispatched via custom event');
+                    } catch(e) {
+                        console.error('[HermesApp] Photo injection failed:', e);
+                    }
+                })();
+            """.trimIndent()
+
+            webView.evaluateJavascript(js, null)
+            clearPendingCameraState()
+
+        } catch (e: Exception) {
+            Log.e("HermesApp", "Failed to inject pending photo", e)
+            clearPendingCameraState()
+        }
     }
 
     // --- Native audio recording ---
