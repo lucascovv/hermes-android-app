@@ -140,9 +140,10 @@ class MainActivity : AppCompatActivity() {
             savedUrl?.let { loadUrl(it) }
         }
 
-        // Disable swipe-to-refresh when WebView is not at the top (prevents accidental reloads)
-        webView.setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            swipeRefresh.isEnabled = scrollY == 0
+        // Disable swipe-to-refresh when WebView content is scrolled down
+        // This prevents accidental reloads while scrolling conversations
+        swipeRefresh.setOnChildScrollUpCallback { _, _ ->
+            webView.scrollY > 0
         }
 
         swipeRefresh.setOnRefreshListener {
@@ -407,29 +408,26 @@ class MainActivity : AppCompatActivity() {
                     }
                 };
 
-                console.log('[HermesApp] Native bridge v2.2 installed');
+                console.log('[HermesApp] Native bridge v2.2.1 installed');
 
-                // Inject "Alterar servidor" option in the settings page
+                // Inject "Alterar servidor" card in the settings hub page
                 function injectServerOption() {
                     if (document.querySelector('#hermes-change-server')) return;
-                    // Look for the settings sidebar or settings view
-                    var settingsContainer = document.querySelector('.settings--content .settings--content--inner') 
-                        || document.querySelector('.profile--section')
-                        || document.querySelector('.settings-section');
-                    if (!settingsContainer) return;
-                    var btn = document.createElement('div');
-                    btn.id = 'hermes-change-server';
-                    btn.innerHTML = '<div style="padding:12px 16px;margin:8px 0;background:#f3f4f6;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid #e5e7eb;">' +
-                        '<span style="font-size:18px;">🔗</span>' +
-                        '<div><div style="font-weight:600;color:#374151;font-size:14px;">Alterar servidor</div>' +
-                        '<div style="color:#9ca3af;font-size:12px;">Trocar URL de conexão do app</div></div></div>';
-                    btn.onclick = function() { HermesAndroid.changeServerUrl(); };
-                    settingsContainer.appendChild(btn);
+                    // Find the settings grid (grid-cols-2 hub cards)
+                    var grid = document.querySelector('div[class*="grid-cols-2"][class*="gap-"]');
+                    if (!grid) return;
+                    // Check that it looks like the settings hub (has glass-card children)
+                    if (!grid.querySelector('[class*="glass-card"]') && !grid.querySelector('[class*="flex-col"]')) return;
+                    var card = document.createElement('div');
+                    card.id = 'hermes-change-server';
+                    card.className = 'flex flex-col items-center justify-center p-5 sm:p-6 glass-card rounded-2xl hover:bg-hermes-50/50 dark:hover:bg-hermes-900/10 transition-all duration-200 min-h-[110px] sm:min-h-[120px] group cursor-pointer border-2 border-transparent hover:border-hermes-200 dark:hover:border-hermes-800/40';
+                    card.innerHTML = '<div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center mb-2 sm:mb-3 bg-gradient-to-br from-blue-400 to-blue-600 shadow-lg"><svg class="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg></div><span class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 text-center leading-tight">Alterar<br/>Servidor</span>';
+                    card.onclick = function() { if(window.HermesAndroid) HermesAndroid.changeServerUrl(); };
+                    grid.appendChild(card);
                 }
-                // Observe DOM changes to inject when settings page is loaded
-                var observer = new MutationObserver(function() { setTimeout(injectServerOption, 500); });
-                observer.observe(document.body, { childList: true, subtree: true });
-                setTimeout(injectServerOption, 1000);
+                var _hsObserver = new MutationObserver(function() { setTimeout(injectServerOption, 300); });
+                _hsObserver.observe(document.body, { childList: true, subtree: true });
+                setTimeout(injectServerOption, 1500);
             })();
         """.trimIndent()
 
