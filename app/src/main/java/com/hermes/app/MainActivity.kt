@@ -155,17 +155,10 @@ class MainActivity : AppCompatActivity() {
             savedUrl?.let { loadUrl(it) }
         }
 
-        // Disable swipe-to-refresh when WebView content is scrolled down
-        // This prevents accidental reloads while scrolling conversations
-        swipeRefresh.setOnChildScrollUpCallback { _, _ ->
-            webView.scrollY > 0
-        }
-
-        swipeRefresh.setOnRefreshListener {
-            webView.reload()
-            swipeRefresh.postDelayed({ swipeRefresh.isRefreshing = false }, 2000)
-        }
-        swipeRefresh.setColorSchemeResources(R.color.hermes_primary)
+        // Disable SwipeRefreshLayout completely
+        // This is a SPA app — pull-to-refresh causes accidental reloads
+        // and WebView.scrollY is always 0 (scroll is internal to web content)
+        swipeRefresh.isEnabled = false
 
         // Back button handling
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -314,7 +307,7 @@ class MainActivity : AppCompatActivity() {
                     fileUploadCallback = null
                 }
             },
-            onPermissionRequest = { request -> runOnUiThread { request.grant(request.resources) } },
+            onPermissionRequestCallback = { request -> runOnUiThread { request.grant(request.resources) } },
             onProgressChanged = { progress ->
                 progressBar.progress = progress
                 if (progress >= 100) progressBar.visibility = View.GONE
@@ -425,7 +418,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 };
 
-                console.log('[HermesApp] Native bridge v2.2.2 installed');
+                console.log('[HermesApp] Native bridge v2.2.3 installed');
 
                 // Inject "Alterar servidor" card in the settings hub page
                 function injectServerOption() {

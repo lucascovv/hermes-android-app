@@ -9,9 +9,12 @@ import android.webkit.WebView
 
 class HermesWebChromeClient(
     private val onFileChooser: (ValueCallback<Array<Uri>>, FileChooserParams) -> Unit,
-    private val onPermissionRequest: (PermissionRequest) -> Unit,
+    private val onPermissionRequestCallback: (PermissionRequest) -> Unit,
     private val onProgressChanged: (Int) -> Unit
 ) : WebChromeClient() {
+
+    // Guard against recursive onPermissionRequest calls (WebView bug)
+    private var isGrantingPermission = false
 
     override fun onShowFileChooser(
         webView: WebView?,
@@ -26,7 +29,14 @@ class HermesWebChromeClient(
     }
 
     override fun onPermissionRequest(request: PermissionRequest?) {
-        request?.let { onPermissionRequest(it) }
+        if (request == null) return
+        if (isGrantingPermission) return  // Prevent recursive calls
+        isGrantingPermission = true
+        try {
+            onPermissionRequestCallback(request)
+        } finally {
+            isGrantingPermission = false
+        }
     }
 
     override fun onProgressChanged(view: WebView?, newProgress: Int) {
