@@ -9,5 +9,5 @@
     <string name="change_url">Alterar servidor</string>
     <string name="retry">Tentar novamente</string>
     <string name="error_generic">Erro ao carregar a página.\nVerifique a URL e sua conexão.</string>
-    <string name="app_version">Hermes App v2.1.0</string>
+    <string name="app_version">Hermes App v2.2.0</string>
 </resources>

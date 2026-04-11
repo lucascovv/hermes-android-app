@@ -27,7 +27,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.Button
 import android.widget.EditText
-import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -60,7 +59,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var errorView: View
     private lateinit var errorText: TextView
     private lateinit var retryButton: Button
-    private lateinit var changeUrlButton: ImageButton
     private lateinit var swipeRefresh: SwipeRefreshLayout
 
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
@@ -106,9 +104,27 @@ class MainActivity : AppCompatActivity() {
         NotificationHelper.createChannel(this)
         setupWebView()
 
+        // Restore camera URI if activity was recreated (e.g. after camera app)
+        if (savedInstanceState != null) {
+            cameraPhotoUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                savedInstanceState.getParcelable("cameraPhotoUri", Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                savedInstanceState.getParcelable("cameraPhotoUri")
+            }
+        }
+
         savedUrl = getPrefs().getString(KEY_SERVER_URL, null)
         if (savedUrl != null) {
-            showWebView(savedUrl!!)
+            if (savedInstanceState != null) {
+                // Activity recreated — restore WebView state instead of reloading
+                configContainer.visibility = View.GONE
+                webContainer.visibility = View.VISIBLE
+                errorView.visibility = View.GONE
+                webView.restoreState(savedInstanceState)
+            } else {
+                showWebView(savedUrl!!)
+            }
         } else {
             showConfig()
         }
@@ -124,7 +140,10 @@ class MainActivity : AppCompatActivity() {
             savedUrl?.let { loadUrl(it) }
         }
 
-        changeUrlButton.setOnClickListener { showConfig() }
+        // Disable swipe-to-refresh when WebView is not at the top (prevents accidental reloads)
+        webView.setOnScrollChangeListener { _, _, scrollY, _, _ ->
+            swipeRefresh.isEnabled = scrollY == 0
+        }
 
         swipeRefresh.setOnRefreshListener {
             webView.reload()
@@ -156,7 +175,6 @@ class MainActivity : AppCompatActivity() {
         errorView = findViewById(R.id.errorView)
         errorText = findViewById(R.id.errorText)
         retryButton = findViewById(R.id.retryButton)
-        changeUrlButton = findViewById(R.id.changeUrlButton)
         swipeRefresh = findViewById(R.id.swipeRefresh)
     }
 
@@ -183,7 +201,7 @@ class MainActivity : AppCompatActivity() {
         return normalized.trimEnd('/')
     }
 
-    private fun showConfig() {
+    fun showConfig() {
         configContainer.visibility = View.VISIBLE
         webContainer.visibility = View.GONE
         errorView.visibility = View.GONE
@@ -389,7 +407,29 @@ class MainActivity : AppCompatActivity() {
                     }
                 };
 
-                console.log('[HermesApp] Native bridge v2.0 installed');
+                console.log('[HermesApp] Native bridge v2.2 installed');
+
+                // Inject "Alterar servidor" option in the settings page
+                function injectServerOption() {
+                    if (document.querySelector('#hermes-change-server')) return;
+                    // Look for the settings sidebar or settings view
+                    var settingsContainer = document.querySelector('.settings--content .settings--content--inner') 
+                        || document.querySelector('.profile--section')
+                        || document.querySelector('.settings-section');
+                    if (!settingsContainer) return;
+                    var btn = document.createElement('div');
+                    btn.id = 'hermes-change-server';
+                    btn.innerHTML = '<div style="padding:12px 16px;margin:8px 0;background:#f3f4f6;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px;border:1px solid #e5e7eb;">' +
+                        '<span style="font-size:18px;">🔗</span>' +
+                        '<div><div style="font-weight:600;color:#374151;font-size:14px;">Alterar servidor</div>' +
+                        '<div style="color:#9ca3af;font-size:12px;">Trocar URL de conexão do app</div></div></div>';
+                    btn.onclick = function() { HermesAndroid.changeServerUrl(); };
+                    settingsContainer.appendChild(btn);
+                }
+                // Observe DOM changes to inject when settings page is loaded
+                var observer = new MutationObserver(function() { setTimeout(injectServerOption, 500); });
+                observer.observe(document.body, { childList: true, subtree: true });
+                setTimeout(injectServerOption, 1000);
             })();
         """.trimIndent()
 
@@ -595,6 +635,12 @@ class MainActivity : AppCompatActivity() {
             "(function(){ if(window.__hermesCable && window.__hermesCable.forceReconnect) window.__hermesCable.forceReconnect(); })()",
             null
         )
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        webView.saveState(outState)
+        cameraPhotoUri?.let { outState.putParcelable("cameraPhotoUri", it) }
     }
 
     override fun onDestroy() {

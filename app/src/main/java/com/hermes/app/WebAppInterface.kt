@@ -56,4 +56,9 @@ class WebAppInterface(private val context: Context) {
     fun cancelAudioRecording() {
         activity?.cancelNativeAudioRecording()
     }
+
+    @JavascriptInterface
+    fun changeServerUrl() {
+        activity?.runOnUiThread { activity?.showConfig() }
+    }
 }
