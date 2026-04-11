@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hermes</string>
+    <string name="config_subtitle">Conecte-se à sua plataforma de atendimento</string>
+    <string name="config_url_label">URL do servidor</string>
+    <string name="config_url_hint">https://seu-dominio.com.br</string>
+    <string name="config_url_helper">Ex: https://hermes.suaempresa.com.br</string>
+    <string name="config_connect">Conectar</string>
+    <string name="change_url">Alterar servidor</string>
+    <string name="retry">Tentar novamente</string>
+    <string name="error_generic">Erro ao carregar a página.\nVerifique a URL e sua conexão.</string>
+    <string name="app_version">Hermes App v2.0.0</string>
+</resources>
